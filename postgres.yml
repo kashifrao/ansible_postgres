@@ -1,0 +1,99 @@
+  == File: postgresql.yml
+#
+# Install & Configure PostgreSQL Server
+#
+#  == Copyright
+#     All Rights Reserved
+#
+# --------------------------------------------------------------------------
+# WARNING: This file belongs to the Core framework. Avoid any local changes
+# --------------------------------------------------------------------------
+#
+# This file is Managed by ANSIBLE
+# --------------------------------------------------------------------------
+
+
+    - name: "Install packages"
+      dnf: "name={{ item }} state=present"
+      with_items:
+        - postgresql
+        - postgresql-server
+        - python3-psycopg2
+
+
+    - name: "Find out if PostgreSQL is initialized"
+      ansible.builtin.stat:
+        path: "/var/lib/pgsql/data/pg_hba.conf"
+      register: postgres_data
+
+    - name: "Initialize PostgreSQL"
+      shell: "postgresql-setup initdb"
+      when: not postgres_data.stat.exists
+
+    - name: "Start and enable services"
+      service: "name={{ item }} state=started enabled=yes"
+      with_items:
+        - postgresql
+
+    - name: Copy pgpass File
+      template:
+        src: "{{ansible_roles_path}}/files/postgresql/pg_pass.j2"
+        dest: "/usr/bin/.pgpass"
+
+    - name: "Create db user"
+      postgresql_user:
+        state: present
+        name: "master"
+        password: "{{ master_pass }}"
+      become: yes
+      become_user: postgres
+
+    - name: "Create db user"
+      postgresql_user:
+        state: present
+        name: "backup"
+        password: "{{ backup_pass }}"
+      become: yes
+      become_user: postgres
+
+    - name: "Grant db user access to app db"
+      postgresql_privs:
+        type: database
+        database: "postgres"
+        roles: "master"
+        grant_option: yes
+        privs: all
+      become: yes
+      become_user: postgres
+
+    #- name: "Allow md5 connection for the db user"
+    #  postgresql_pg_hba:
+    #    dest: "/var/lib/pgsql/data/pg_hba.conf"
+    #    contype: host
+    #    databases: all
+    #    method: md5
+    #    users: "all"
+    #    create: true
+    #  become: yes
+    #  become_user: postgres
+    #  notify: restart postgresql
+
+    - name: Copy postgresql.conf file
+      copy:
+        src: "{{ansible_roles_path}}/files/postgresql/postgresql.conf"
+        dest: /var/lib/pgsql/data/
+
+    - name: Copy pg_hba.conf file
+      copy:
+        src: "{{ansible_roles_path}}/files/postgresql/pg_hba.conf"
+        dest: /var/lib/pgsql/data/
+
+
+    - name: Restart Postgres
+      command: sudo service postgresql restart
+
+    - name: Start and Enable Postgres Service
+      systemd:
+        name: postgresql
+        state: restarted
+        enabled: yes
